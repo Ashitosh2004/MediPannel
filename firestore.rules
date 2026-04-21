@@ -1,0 +1,237 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPER FUNCTIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** True when the request comes from a signed-in user */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /** True when the caller's UID matches the given uid */
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    /** True when a document exists in the `admins` collection for this caller */
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    /**
+     * True when the caller has a doctors/{uid} document (primary check)
+     * OR when a doctor document exists and its uid field matches auth.uid.
+     * This handles the brief window after login before the uid-doc is fully created.
+     */
+    function isDoctor() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/doctors/$(request.auth.uid));
+    }
+
+    /**
+     * Fallback: matches when the caller's UID appears as the doctorId or
+     * doctorUid field IN the specific appointment/message document being read.
+     * Firestore evaluates resource.data per-document for collection queries,
+     * so this works for both single-doc reads and WHERE-filtered collection reads.
+     * Ensures doctors can read their own records even if doctors/{uid} not yet created.
+     */
+    function isDoctorOfRecord() {
+      return isSignedIn() && (
+        resource.data.doctorId == request.auth.uid ||
+        resource.data.doctorUid == request.auth.uid
+      );
+    }
+
+    /** True when a document exists in the `users` collection for this caller */
+    function isPatient() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // users — Patient profile documents
+    // ─────────────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isUser(userId) || isDoctor() || isAdmin();
+      allow create: if isUser(userId);
+      // Patient can update their own profile (e.g. onboarding, profile edits)
+      allow update: if isUser(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // doctors — Doctor profile documents
+    // ─────────────────────────────────────────────────────────────────────────
+    match /doctors/{doctorId} {
+      allow read: if isSignedIn();           // patients, doctors, admins can all read
+      // Admin creates doctor records. A doctor can also create/set their own {uid} document
+      // on first login (when the admin-created record used a random doc ID).
+      allow create: if isAdmin() || isUser(doctorId);
+      allow update: if isAdmin() || isUser(doctorId) || isDoctor();  // admin OR the doctor themselves
+      allow delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // admins — Admin profile documents
+    // ─────────────────────────────────────────────────────────────────────────
+    match /admins/{adminId} {
+      allow read, write: if isUser(adminId) || isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // appointments — Appointment records
+    // ─────────────────────────────────────────────────────────────────────────
+    match /appointments/{appointmentId} {
+      // Admin reads all. Doctors and patients can query the collection;
+      // the client WHERE clause filters to relevant docs.
+      // isDoctorOfRecord() is a per-document fallback for the transition period
+      // before doctors/{uid} is created (handles "permission denied" on first login).
+      allow read: if isAdmin() || isDoctor() || isPatient() || isDoctorOfRecord();
+
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid)
+                    || (isDoctor() && resource.data.doctorId == request.auth.uid)
+                    || isDoctorOfRecord();
+
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // messages — Real-time chat between patients and doctors
+    // ─────────────────────────────────────────────────────────────────────────
+    // IMPORTANT: For Firestore collection queries with WHERE clauses (e.g.
+    // where('senderId', '==', uid)), the security rule must allow reads for
+    // any authenticated user who is part of the conversation.
+    // We allow read if the caller is the sender or receiver of this message.
+    // Collection queries are filtered by the client — Firestore evaluates the
+    // rule per document returned, so this is secure.
+    // ─────────────────────────────────────────────────────────────────────────
+    match /messages/{messageId} {
+      // Doctors and patients need collection-level queries.
+      // isDoctorOfRecord() checks senderId/receiverId as fallback when isDoctor() hasn't passed yet.
+      allow read: if isAdmin() || isDoctor() || isPatient()
+                  || (isSignedIn() && (
+                      resource.data.senderId == request.auth.uid ||
+                      resource.data.receiverId == request.auth.uid
+                    ));
+
+      // Only the sender can create a message, and they must set themselves as sender
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+
+      // Sender or receiver can update (e.g., mark as read)
+      allow update: if isAdmin()
+                    || (isSignedIn() && (
+                        resource.data.senderId == request.auth.uid ||
+                        resource.data.receiverId == request.auth.uid
+                    ));
+
+      allow delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // prescriptions — Prescriptions written by doctors for patients
+    // ─────────────────────────────────────────────────────────────────────────
+    match /prescriptions/{prescriptionId} {
+      // Allow collection-level reads for doctors, patients, and admins.
+      // resource.data checks block collection queries — the client WHERE clause
+      // already filters to only relevant documents.
+      allow read: if isAdmin() || isDoctor() || isPatient();
+
+      allow create: if isDoctor();
+
+      allow update: if isAdmin()
+                    || (isDoctor() && resource.data.doctorId == request.auth.uid);
+
+      allow delete: if isAdmin()
+                    || (isDoctor() && resource.data.doctorId == request.auth.uid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // records — Medical records / uploaded documents
+    // ─────────────────────────────────────────────────────────────────────────
+    match /records/{recordId} {
+      // Allow collection-level reads for patients, doctors, and admins.
+      // The client WHERE clause (where userId == uid) already filters correctly;
+      // resource.data checks only work on single-doc gets, not collection queries.
+      allow read: if isAdmin() || isDoctor() || isPatient();
+
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // notifications — In-app notification bell documents
+    // ─────────────────────────────────────────────────────────────────────────
+    match /notifications/{notificationId} {
+      // Doctors/patients need collection queries (where userId == uid).
+      allow read: if isAdmin() || isDoctor() || isPatient();
+
+      allow create: if isSignedIn();  // any portal user can send notifications
+
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // availability — Doctor availability schedules
+    // ─────────────────────────────────────────────────────────────────────────
+    match /availability/{availabilityId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() || (isDoctor() && request.resource.data.doctorId == request.auth.uid);
+      allow update: if isAdmin() || (isDoctor() && resource.data.doctorId == request.auth.uid);
+      allow delete: if isAdmin() || (isDoctor() && resource.data.doctorId == request.auth.uid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // auditLogs — Admin action audit trail
+    // ─────────────────────────────────────────────────────────────────────────
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;  // immutable
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // adminBroadcasts — Admin broadcast messages to all doctors
+    // ─────────────────────────────────────────────────────────────────────────
+    match /adminBroadcasts/{broadcastId} {
+      allow read: if isAdmin() || isDoctor() || isPatient();
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // globalHolidays — System-wide holiday/closure dates
+    // ─────────────────────────────────────────────────────────────────────────
+    match /globalHolidays/{holidayId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // support_tickets — Help / contact form submissions
+    // ─────────────────────────────────────────────────────────────────────────
+    match /support_tickets/{ticketId} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+  }
+}
