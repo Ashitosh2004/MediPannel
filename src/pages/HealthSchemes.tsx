@@ -11,6 +11,7 @@ interface Scheme {
   description: string;
   color: string;
   bgColor: string;
+  accentColor: string;   // top accent bar — explicit, no split() needed
   url: string;
   beneficiaries: string[];
   howToApply: string[];
@@ -27,6 +28,7 @@ const SCHEMES: Scheme[] = [
     description: 'Provides cashless treatment at empanelled hospitals for poor and vulnerable families across India.',
     color: 'text-emerald-700',
     bgColor: 'bg-emerald-50 border-emerald-200',
+    accentColor: 'bg-emerald-400',
     url: 'https://pmjay.gov.in',
     beneficiaries: [
       'Poor and vulnerable families (as per SECC database)',
@@ -49,6 +51,7 @@ const SCHEMES: Scheme[] = [
     description: 'Financial assistance for pregnant women from low-income families to promote safe institutional delivery.',
     color: 'text-pink-700',
     bgColor: 'bg-pink-50 border-pink-200',
+    accentColor: 'bg-pink-400',
     url: 'https://nhm.gov.in/index1.php?lang=1&level=3&sublinkid=841&lid=309',
     beneficiaries: [
       'Pregnant women from low-income families',
@@ -71,6 +74,7 @@ const SCHEMES: Scheme[] = [
     description: 'Strengthening healthcare infrastructure in rural India — free medicines, diagnostics and more.',
     color: 'text-blue-700',
     bgColor: 'bg-blue-50 border-blue-200',
+    accentColor: 'bg-blue-400',
     url: 'https://nhm.gov.in',
     beneficiaries: [
       'Rural population across India',
@@ -93,6 +97,7 @@ const SCHEMES: Scheme[] = [
     description: 'Promotes Ayurveda, Yoga, Unani, Siddha and Homeopathy for holistic health and wellness.',
     color: 'text-teal-700',
     bgColor: 'bg-teal-50 border-teal-200',
+    accentColor: 'bg-teal-400',
     url: 'https://ayush.gov.in',
     beneficiaries: [
       'People interested in traditional medicine',
@@ -115,6 +120,7 @@ const SCHEMES: Scheme[] = [
     description: 'National Nutrition Mission focusing on reducing malnutrition for children under 6, pregnant and lactating women.',
     color: 'text-orange-700',
     bgColor: 'bg-orange-50 border-orange-200',
+    accentColor: 'bg-orange-400',
     url: 'https://poshanabhiyaan.gov.in',
     beneficiaries: [
       'Pregnant women and lactating mothers',
@@ -137,7 +143,7 @@ function SchemeCard({ scheme }: { scheme: Scheme }) {
   return (
     <div className={`bg-card border rounded-2xl overflow-hidden hover:shadow-lg transition-all duration-300 ${expanded ? 'shadow-md' : ''}`}>
       {/* Top accent bar */}
-      <div className={`h-1.5 w-full ${scheme.bgColor.split(' ')[0].replace('bg-', 'bg-').replace('50', '400')}`} />
+      <div className={`h-1.5 w-full ${scheme.accentColor}`} />
 
       <div className="p-5">
         {/* Header */}
