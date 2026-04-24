@@ -276,8 +276,8 @@ export function Appointments() {
       header: 'Doctor',
       cell: ({ row }: any) => (
         <Persona 
-          name={row.original.doctorName} 
-          subtitle={row.original.specialty} 
+          name={row.original.doctorName || 'Unknown Doctor'} 
+          subtitle={row.original.specialty || 'General'} 
         />
       )
     },

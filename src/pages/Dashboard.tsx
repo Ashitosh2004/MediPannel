@@ -197,7 +197,7 @@ export function Dashboard() {
                 {appointments.slice(0, 1).map((apt) => (
                   <div key={apt.id} className="space-y-4">
                     <div className="p-4 bg-muted/40 rounded-xl border border-border">
-                      <Persona name={apt.doctorName || '—'} subtitle={apt.specialty || ''} />
+                      <Persona name={apt.doctorName || 'Unknown Doctor'} subtitle={apt.specialty || 'General'} />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="bg-primary/5 rounded-xl p-3.5 space-y-0.5 border border-primary/10">
