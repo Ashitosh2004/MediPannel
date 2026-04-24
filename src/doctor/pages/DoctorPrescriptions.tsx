@@ -8,6 +8,7 @@ import {
   serverTimestamp,
   doc,
   getDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -22,6 +23,7 @@ import {
   Loader2,
   UserRound,
   StickyNote,
+  Pencil,
 } from 'lucide-react';
 import { useDoctorAuth } from '../contexts/DoctorAuthContext';
 import { db } from '../../lib/firebase';
@@ -44,6 +46,7 @@ interface Prescription {
   medicines: Medicine[];
   notes: string;
   createdAt: any;
+  status?: string;
 }
 
 interface PatientOption {
@@ -104,7 +107,7 @@ function MedicineRow({ medicine, index, onChange, onRemove, canRemove }: Medicin
             }
             value={medicine[field]}
             onChange={(e) => onChange(index, field, e.target.value)}
-            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 placeholder:text-slate-300"
+            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white text-slate-800 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 placeholder:text-slate-300"
           />
         </div>
       ))}
@@ -247,7 +250,7 @@ function NewPrescriptionModal({
                     setShowPatientDropdown(true);
                   }}
                   onFocus={() => setShowPatientDropdown(true)}
-                  className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
+                  className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm bg-white text-slate-800 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 placeholder:text-slate-400"
                 />
                 {selectedPatient && (
                   <button
@@ -333,7 +336,7 @@ function NewPrescriptionModal({
               placeholder="Any special instructions or notes for the patient..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 resize-none placeholder:text-slate-300"
+              className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white text-slate-800 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 resize-none placeholder:text-slate-300"
             />
           </div>
         </form>
@@ -365,14 +368,130 @@ function NewPrescriptionModal({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Edit Prescription Modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface EditPrescriptionModalProps {
+  prescription: Prescription;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function EditPrescriptionModal({ prescription, onClose, onSuccess }: EditPrescriptionModalProps) {
+  const [medicines, setMedicines] = useState<Medicine[]>(
+    prescription.medicines?.length ? prescription.medicines.map(m => ({ ...m })) : [emptyMedicine()]
+  );
+  const [notes, setNotes] = useState(prescription.notes || '');
+  const [submitting, setSubmitting] = useState(false);
+
+  function handleMedicineChange(index: number, field: keyof Medicine, value: string) {
+    setMedicines(prev => { const u = [...prev]; u[index] = { ...u[index], [field]: value }; return u; });
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    const validMedicines = medicines.filter(m => m.name.trim());
+    if (!validMedicines.length) { toast.error('Add at least one medicine'); return; }
+    setSubmitting(true);
+    try {
+      await updateDoc(doc(db, 'prescriptions', prescription.id), {
+        medicines: validMedicines,
+        notes: notes.trim(),
+      });
+      toast.success('Prescription updated!');
+      onSuccess();
+      onClose();
+    } catch {
+      toast.error('Failed to save changes.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+              <FileText size={16} className="text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Edit Prescription</h2>
+              <p className="text-xs text-slate-400">{prescription.patientName}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-5 space-y-6">
+          {/* Medicines */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">1</span>
+              <h3 className="text-sm font-bold text-slate-700">Medicines</h3>
+            </div>
+            <div className="space-y-2">
+              {medicines.map((medicine, index) => (
+                <MedicineRow
+                  key={index}
+                  medicine={medicine}
+                  index={index}
+                  onChange={handleMedicineChange}
+                  onRemove={i => setMedicines(prev => prev.filter((_, idx) => idx !== i))}
+                  canRemove={medicines.length > 1}
+                />
+              ))}
+            </div>
+            <button type="button" onClick={() => setMedicines(prev => [...prev, emptyMedicine()])} className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors">
+              <Plus size={15} /> Add Medicine
+            </button>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">2</span>
+              <h3 className="text-sm font-bold text-slate-700">Notes (Optional)</h3>
+            </div>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Special instructions for the patient..."
+              className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 resize-none placeholder:text-slate-300"
+            />
+          </div>
+        </form>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-slate-100">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={submitting} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-colors inline-flex items-center gap-2 disabled:opacity-60">
+            {submitting ? <><Loader2 size={15} className="animate-spin" />Saving...</> : <><FileText size={15} />Save Changes</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Prescription Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface PrescriptionCardProps {
   prescription: Prescription;
+  onStatusChange: (id: string, status: string) => void;
+  onEdit: (prescription: Prescription) => void;
 }
 
-function PrescriptionCard({ prescription }: PrescriptionCardProps) {
+function PrescriptionCard({ prescription, onStatusChange, onEdit }: PrescriptionCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -388,16 +507,49 @@ function PrescriptionCard({ prescription }: PrescriptionCardProps) {
             <p className="text-xs text-slate-400">{formatDate(prescription.createdAt)}</p>
           </div>
         </div>
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-emerald-600 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-emerald-50"
-        >
-          {expanded ? (
-            <><ChevronUp size={14} /> Hide</>
-          ) : (
-            <><ChevronDown size={14} /> Details</>
-          )}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onEdit(prescription)}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-blue-600 transition-colors px-2 py-1.5 rounded-lg hover:bg-blue-50"
+            title="Edit prescription"
+          >
+            <Pencil size={13} />
+            Edit
+          </button>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-emerald-600 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-emerald-50"
+          >
+            {expanded ? (
+              <><ChevronUp size={14} /> Hide</>
+            ) : (
+              <><ChevronDown size={14} /> Details</>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Status controls */}
+      <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-1">Status:</span>
+        {(['active', 'completed', 'expired'] as const).map(s => {
+          const active = (prescription.status || 'active') === s;
+          const colors: Record<string, string> = {
+            active:    active ? 'bg-emerald-500 text-white border-emerald-600' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600',
+            completed: active ? 'bg-blue-500 text-white border-blue-600'      : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600',
+            expired:   active ? 'bg-red-500 text-white border-red-600'        : 'bg-white text-slate-500 border-slate-200 hover:border-red-300 hover:text-red-500',
+          };
+          return (
+            <button
+              key={s}
+              onClick={() => !active && onStatusChange(prescription.id, s)}
+              disabled={active}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide border transition-all ${colors[s]} ${active ? 'cursor-default' : 'cursor-pointer active:scale-95'}`}
+            >
+              {s}
+            </button>
+          );
+        })}
       </div>
 
       {/* Medicines Pills */}
@@ -487,6 +639,8 @@ export function DoctorPrescriptions() {
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editingPrescription, setEditingPrescription] = useState<Prescription | null>(null);
+  const [search, setSearch] = useState('');
 
   // ── Fetch prescriptions ───────────────────────────────────────
   async function fetchPrescriptions() {
@@ -497,7 +651,6 @@ export function DoctorPrescriptions() {
         where('doctorId', '==', uid),
       );
       const snap = await getDocs(q);
-      // Sort client-side by createdAt descending to avoid composite index requirement
       const sorted = snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<Prescription, 'id'>) }))
         .sort((a, b) => {
@@ -508,6 +661,16 @@ export function DoctorPrescriptions() {
       setPrescriptions(sorted);
     } catch {
       toast.error('Failed to load prescriptions');
+    }
+  }
+
+  async function handleStatusChange(prescId: string, newStatus: string) {
+    try {
+      await updateDoc(doc(db, 'prescriptions', prescId), { status: newStatus });
+      setPrescriptions(prev => prev.map(p => p.id === prescId ? { ...p, status: newStatus } : p));
+      toast.success(`Prescription marked as ${newStatus}`);
+    } catch {
+      toast.error('Failed to update status.');
     }
   }
 
@@ -585,6 +748,26 @@ export function DoctorPrescriptions() {
         </button>
       </div>
 
+      {/* Search bar */}
+      <div className="relative">
+        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search by patient name or medicine..."
+          className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+
       {/* Content */}
       {loading ? (
         <div className="space-y-3">
@@ -621,15 +804,35 @@ export function DoctorPrescriptions() {
             New Prescription
           </button>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {prescriptions.map((rx) => (
-            <PrescriptionCard key={rx.id} prescription={rx} />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        const filtered = prescriptions.filter(rx => {
+          if (!search) return true;
+          const q = search.toLowerCase();
+          return (
+            rx.patientName?.toLowerCase().includes(q) ||
+            rx.medicines?.some(m => m.name?.toLowerCase().includes(q))
+          );
+        });
+        return filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
+            <p className="text-slate-400 text-sm">No results for <span className="font-semibold text-slate-600">"{search}"</span></p>
+            <button onClick={() => setSearch('')} className="mt-3 text-emerald-600 text-xs font-semibold hover:underline">Clear search</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((rx) => (
+              <PrescriptionCard
+                key={rx.id}
+                prescription={rx}
+                onStatusChange={handleStatusChange}
+                onEdit={setEditingPrescription}
+              />
+            ))}
+          </div>
+        );
+      })()}
 
-      {/* Modal */}
+      {/* New Prescription Modal */}
       {showModal && (
         <NewPrescriptionModal
           onClose={() => setShowModal(false)}
@@ -637,6 +840,15 @@ export function DoctorPrescriptions() {
           patients={patients}
           doctorId={uid}
           doctorName={doctorData?.name ?? ''}
+        />
+      )}
+
+      {/* Edit Prescription Modal */}
+      {editingPrescription && (
+        <EditPrescriptionModal
+          prescription={editingPrescription}
+          onClose={() => setEditingPrescription(null)}
+          onSuccess={fetchPrescriptions}
         />
       )}
     </div>

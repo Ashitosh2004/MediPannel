@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   Bell,
+  Lock,
 } from 'lucide-react';
 import { useDoctorAuth } from '../contexts/DoctorAuthContext';
 import { toast } from 'react-hot-toast';
@@ -34,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard',     icon: LayoutDashboard, href: '/doctor' },
   { label: 'Appointments',  icon: CalendarDays,    href: '/doctor/appointments' },
   { label: 'Patients',      icon: Users,           href: '/doctor/patients' },
+  { label: 'MedLocker',     icon: Lock,            href: '/doctor/medlocker' },
   { label: 'Prescriptions', icon: FileText,        href: '/doctor/prescriptions' },
   { label: 'Availability',  icon: Clock,           href: '/doctor/availability' },
   { label: 'Messages',      icon: MessageSquare,   href: '/doctor/messages' },

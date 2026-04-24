@@ -41,7 +41,8 @@ import {
   AlertCircle,
   Stethoscope,
   Trash2,
-  CalendarDays
+  CalendarDays,
+  Phone
 } from 'lucide-react';
 import { collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -52,6 +53,9 @@ import { toast } from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+
+// Backend URL — update this if you restart ngrok
+const BACKEND_URL = 'https://catnap-employed-causal.ngrok-free.dev';
 
 const appointmentSchema = z.object({
   doctorId: z.string().min(1, 'Please select a doctor'),
@@ -79,6 +83,7 @@ export function Appointments() {
   const [doctorsLoading, setDoctorsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCallingBack, setIsCallingBack] = useState(false);
 
   const { register, handleSubmit, formState: { errors }, reset, setValue } = useForm<AppointmentForm>({
     resolver: zodResolver(appointmentSchema),
@@ -196,14 +201,73 @@ export function Appointments() {
   };
 
   const handleDelete = async (id: string) => {
-     if (!confirm('Are you sure you want to delete this record?')) return;
-     try {
-       await deleteDoc(doc(db, 'appointments', id));
-       toast.success('Appointment deleted');
-     } catch (err) {
-       console.error(err);
-       toast.error('Failed to delete appointment');
-     }
+    if (!confirm('Are you sure you want to delete this record?')) return;
+    try {
+      await deleteDoc(doc(db, 'appointments', id));
+      toast.success('Appointment deleted');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete appointment');
+    }
+  };
+
+  // ── Request a callback from the hospital via Twilio ──────────────────────
+  const handleGetCall = async () => {
+    if (!user) {
+      toast.error('You must be logged in to request a call.');
+      return;
+    }
+
+    // Patient must have a phone number saved in their profile
+    let phone = userData?.phone?.trim();
+    if (!phone) {
+      toast.error('No phone number found. Please add your phone number in Profile settings first.');
+      return;
+    }
+
+    // Normalize to E.164: if Indian number without +91, add it
+    if (!phone.startsWith('+')) {
+      phone = phone.startsWith('91') ? `+${phone}` : `+91${phone}`;
+    }
+
+    setIsCallingBack(true);
+    try {
+      // Get a fresh Firebase ID token to authenticate with the backend
+      const idToken = await user.getIdToken(true);
+
+      console.log('[GetCall] Calling backend:', BACKEND_URL, '| phone:', phone);
+
+      const res = await fetch(`${BACKEND_URL}/start-call`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+          // Required to bypass ngrok's browser-warning interstitial page
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ patient_phone: phone }),
+      });
+
+      const responseText = await res.text();
+      console.log('[GetCall] Backend response:', res.status, responseText);
+
+      if (!res.ok) {
+        let errMsg = 'Unknown error';
+        try { errMsg = JSON.parse(responseText)?.error || errMsg; } catch {}
+        throw new Error(errMsg || `Server error: ${res.status}`);
+      }
+
+      toast.success('📞 Call incoming! Pick up your phone — our AI reception is calling you now.');
+    } catch (err: any) {
+      console.error('[GetCall] Failed:', err);
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+        toast.error('Cannot reach the backend. Is the server running and ngrok active?');
+      } else {
+        toast.error(`Call failed: ${err.message}`);
+      }
+    } finally {
+      setIsCallingBack(false);
+    }
   };
 
   const columns = [
@@ -439,6 +503,28 @@ export function Appointments() {
                <p className="text-[11px] font-medium text-blue-600/80 leading-relaxed">
                  By booking, you agree to our appointment policy. Cancellations must be made at least 24 hours in advance.
                </p>
+            </div>
+
+            {/* Get Call button — Twilio calls the patient back (bypasses Indian→US dialing issue) */}
+            <div className="bg-emerald-500/5 rounded-2xl p-4 border border-emerald-500/10 space-y-3">
+              <p className="text-[11px] font-bold text-emerald-600/80 uppercase tracking-wider">Need to speak with reception?</p>
+              <button
+                type="button"
+                onClick={handleGetCall}
+                disabled={isCallingBack}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 text-white font-bold text-sm transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40"
+              >
+                <Phone size={15} className={isCallingBack ? 'animate-spin' : 'animate-pulse'} />
+                {isCallingBack ? 'Requesting call...' : 'Get Call from Hospital'}
+              </button>
+              <p className="text-[10px] text-emerald-600/60 leading-relaxed">
+                Our AI receptionist will call your registered phone number immediately.
+                {!userData?.phone && (
+                  <span className="block mt-1 text-amber-500/80 font-semibold">
+                    ⚠ Please add your phone number in Profile settings first.
+                  </span>
+                )}
+              </p>
             </div>
 
             <DialogFooter className="pt-4">

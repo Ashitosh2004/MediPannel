@@ -14,6 +14,7 @@ import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { Dashboard } from './pages/Dashboard';
 import { Appointments } from './pages/Appointments';
 import { Records } from './pages/Records';
+import { PatientMedLockerPage } from './pages/PatientMedLockerPage';
 import { Prescriptions } from './pages/Prescriptions';
 import { Messages } from './pages/Messages';
 import { Profile } from './pages/Profile';
@@ -35,6 +36,7 @@ import { DoctorPatientDetail } from './doctor/pages/DoctorPatientDetail';
 import { DoctorMessages } from './doctor/pages/DoctorMessages';
 import { DoctorProfile } from './doctor/pages/DoctorProfile';
 import { DoctorSettings } from './doctor/pages/DoctorSettings';
+import { DoctorMedLockerPage } from './doctor/pages/DoctorMedLockerPage';
 
 // Admin imports
 import { AdminAuthProvider } from './admin/contexts/AdminAuthContext';
@@ -137,6 +139,12 @@ const helpRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/help',
   component: () => <ProtectedRoute><Help /></ProtectedRoute>,
+});
+
+const medlockerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/medlocker',
+  component: () => <ProtectedRoute><PatientMedLockerPage /></ProtectedRoute>,
 });
 
 // ── Doctor routes ──────────────────────────────────────────────
@@ -246,6 +254,16 @@ const doctorSettingsRoute = createRoute({
   ),
 });
 
+const doctorMedLockerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/doctor/medlocker',
+  component: () => (
+    <DoctorProtectedRoute>
+      <DoctorLayout><DoctorMedLockerPage /></DoctorLayout>
+    </DoctorProtectedRoute>
+  ),
+});
+
 // ── Admin routes ────────────────────────────────────────────────
 const adminLoginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -334,6 +352,7 @@ const routeTree = rootRoute.addChildren([
   profileRoute,
   settingsRoute,
   helpRoute,
+  medlockerRoute,
   // Doctor
   doctorLoginRoute,
   doctorForgotPasswordRoute,
@@ -346,6 +365,7 @@ const routeTree = rootRoute.addChildren([
   doctorMessagesRoute,
   doctorProfileRoute,
   doctorSettingsRoute,
+  doctorMedLockerRoute,
   // Admin
   adminLoginRoute,
   adminForgotPasswordRoute,

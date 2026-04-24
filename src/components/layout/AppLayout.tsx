@@ -31,7 +31,8 @@ import {
   User, 
   Settings, 
   HelpCircle,
-  LogOut
+  LogOut,
+  Lock,
 } from 'lucide-react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../../contexts/AuthContext';
@@ -57,6 +58,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     { icon: <LayoutDashboard size={20} />, label: 'Dashboard', href: '/' },
     { icon: <Calendar size={20} />, label: 'Appointments', href: '/appointments' },
     { icon: <FileText size={20} />, label: 'Medical Records', href: '/records' },
+    { icon: <Lock size={20} />, label: 'MedLocker', href: '/medlocker' },
     { icon: <Pill size={20} />, label: 'Prescriptions', href: '/prescriptions' },
     { icon: <MessageSquare size={20} />, label: 'Messages', href: '/messages' },
   ];

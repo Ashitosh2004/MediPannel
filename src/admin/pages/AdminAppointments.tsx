@@ -166,7 +166,9 @@ export function AdminAppointments() {
             <div className="animate-spin h-7 w-7 border-2 border-gray-700 border-t-red-500 rounded-full mx-auto mb-3" />Loading...
           </div>
         ) : filtered.length > 0 ? (
-          <DataTable columns={columns} data={filtered} className="[&_table]:bg-transparent [&_thead]:bg-gray-800/50 [&_thead_th]:text-gray-400 [&_tbody_tr]:border-gray-800 [&_tbody_tr]:hover:bg-gray-800/30 [&_tbody_td]:text-gray-300" />
+          <div className="[&_table]:bg-transparent [&_thead]:bg-gray-800/50 [&_thead_th]:text-gray-400 [&_tbody_tr]:border-gray-800 [&_tbody_tr]:hover:bg-gray-800/30 [&_tbody_td]:text-gray-300">
+            <DataTable columns={columns} data={filtered} />
+          </div>
         ) : (
           <div className="p-14 text-center text-gray-500 text-sm"><Calendar size={28} className="mx-auto mb-3 text-gray-700" /><div>No appointments found</div></div>
         )}

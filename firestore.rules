@@ -233,5 +233,80 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // medlocker — Secure patient medical record vault
+    //
+    // ACCESS MODEL:
+    //   • Patient (owner): full read / write / delete on their own docs
+    //   • Doctor:          read ONLY IF accessControl[doctorId] == true
+    //                      write ONLY for updating accessControl (not isRestricted, not isDeleted)
+    //   • Admin:           NO ACCESS (explicitly denied)
+    //   • Public:          NO ACCESS
+    //
+    // SOFT DELETE: isDeleted is write-once-true — once set to true it stays true.
+    // ─────────────────────────────────────────────────────────────────────────
+    match /medlocker/{reportId} {
+
+      // ── Helpers scoped to this collection ──────────────────────────────────
+
+      // Owner = patient who created this document
+      function isOwner() {
+        return isSignedIn() && request.auth.uid == resource.data.userId;
+      }
+
+      // Doctor with explicit patient-granted access
+      function isDoctorWithAccess() {
+        return isDoctor()
+            && resource.data.accessControl[request.auth.uid] == true;
+      }
+
+      // Uploading doctor writes a new doc — must set themselves as uploader
+      function isUploadingDoctor() {
+        return isDoctor()
+            && request.resource.data.uploadedByDoctorId == request.auth.uid
+            && request.resource.data.userId != request.auth.uid; // doctor ≠ patient
+      }
+
+      // ── Read ───────────────────────────────────────────────────────────────
+      // Owner can always read their own docs.
+      // Doctors can read ONLY docs where they are explicitly granted access.
+      // Admins: explicitly BLOCKED.
+      allow read: if !isAdmin()
+                  && (isOwner() || isDoctorWithAccess());
+
+      // ── Create ─────────────────────────────────────────────────────────────
+      // Patient creates their own doc (userId must match caller).
+      // Doctor uploads a report on behalf of a patient.
+      allow create: if !isAdmin()
+                    && (
+                       // Patient self-upload
+                       (isPatient() && request.resource.data.userId == request.auth.uid)
+                       // Doctor uploading for patient
+                    || isUploadingDoctor()
+                    );
+
+      // ── Update ─────────────────────────────────────────────────────────────
+      // Owner can update any field on their own doc.
+      // Doctor can ONLY update the accessControl field (toggle per-doctor access).
+      //   - Cannot change isRestricted, isDeleted, fileUrl, userId, category, etc.
+      allow update: if !isAdmin()
+                    && (
+                       isOwner()
+                    || (
+                         isDoctorWithAccess()
+                         // Only the accessControl map may change
+                         && request.resource.data.userId      == resource.data.userId
+                         && request.resource.data.isRestricted == resource.data.isRestricted
+                         && request.resource.data.isDeleted   == resource.data.isDeleted
+                         && request.resource.data.fileUrl     == resource.data.fileUrl
+                         && request.resource.data.category    == resource.data.category
+                       )
+                    );
+
+      // ── Delete ─────────────────────────────────────────────────────────────
+      // Hard delete is blocked for everyone — use soft delete (isDeleted = true).
+      allow delete: if false;
+    }
+
   }
 }
