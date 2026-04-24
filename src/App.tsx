@@ -20,6 +20,7 @@ import { Messages } from './pages/Messages';
 import { Profile } from './pages/Profile';
 import { Settings } from './pages/Settings';
 import { Help } from './pages/Help';
+import { HealthSchemes } from './pages/HealthSchemes';
 
 // Doctor imports
 import { DoctorAuthProvider } from './doctor/contexts/DoctorAuthContext';
@@ -145,6 +146,12 @@ const medlockerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/medlocker',
   component: () => <ProtectedRoute><PatientMedLockerPage /></ProtectedRoute>,
+});
+
+const healthSchemesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/health-schemes',
+  component: () => <ProtectedRoute><HealthSchemes /></ProtectedRoute>,
 });
 
 // ── Doctor routes ──────────────────────────────────────────────
@@ -353,6 +360,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   helpRoute,
   medlockerRoute,
+  healthSchemesRoute,
   // Doctor
   doctorLoginRoute,
   doctorForgotPasswordRoute,
