@@ -1,42 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Card, CardContent } from '@blinkdotnew/ui';
-import { MessageCircle, X, Send, Bot, Sparkles, ShieldCheck, Image as ImageIcon } from 'lucide-react';
+import { MessageCircle, X, Send, Bot, Sparkles, ShieldCheck } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { format } from 'date-fns';
+import { groqChat, type GroqMessage } from '../lib/groqChat';
 
-// ─── API config ───────────────────────────────────────────────────────────────
-const LLM_URL = 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQnBYN0haRnpBSFdpSkhRVkZQeXlVMUg4WjA4ZmxTaVowZTZjNHdKTkFUSHRSNGtaaEdJWUJhd0NCM3NXSl9FTjBPdkNaQV93OC1zamxWUGM3RFJmeVZKLTFXenc9PQ==';
-const IMG_URL = 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQnBYN0haRnpBSFdpSkhRVkZQeXlVMUg4WjA4ZmxTaVowZTZjNHdKTkFUSHRSNGtaaEdJWUJhd0NCM3NXSl9FTjBPdkNaQV93OC1zamxWUGM3RFJmeVZKLTFXenc9PQ==';
-
-// Prepend a medical persona so the LLM responds in context
-const PERSONA = 'You are MedBot, a helpful AI health assistant in MedPanel Pro patient portal. ' +
-  'You provide general health info, help patients navigate their portal (appointments, prescriptions, records, messages), ' +
-  'and offer supportive medical guidance. Always recommend consulting a real doctor for diagnosis. ' +
-  'If the user asks to generate/create an image, reply with "/image " followed by the description. ' +
-  'Keep responses concise and warm. User message: ';
+// ─── System persona ────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT: GroqMessage = {
+  role: 'system',
+  content:
+    'You are MedBot, a helpful AI health assistant inside MedPanel Pro patient portal. ' +
+    'You give clear, friendly general health guidance and help patients navigate the portal ' +
+    '(appointments, prescriptions, records, MedLocker, messages). ' +
+    'Always recommend consulting a real doctor for diagnosis or treatment. ' +
+    'Keep responses concise, warm, and in plain text (no markdown). ' +
+    'Never make up medical facts. If unsure, say so.',
+};
 
 interface ChatMessage {
   id: string;
-  type: 'text' | 'image' | 'error';
-  text?: string;
-  imageUrl?: string;
+  text: string;
   sender: 'bot' | 'user';
   timestamp: Date;
+  isError?: boolean;
   actions?: { label: string; onClick: () => void }[];
 }
 
-async function callApi(url: string, prompt: string): Promise<any> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  return res.json();
-}
-
+// ─── Component ─────────────────────────────────────────────────────────────────
 export function ChatBot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [history, setHistory] = useState<GroqMessage[]>([SYSTEM_PROMPT]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -47,18 +41,18 @@ export function ChatBot() {
     setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
   };
 
-  // Initial greeting
+  // Greeting on first open
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       addMsg({
         sender: 'bot',
-        type: 'text',
-        text: "Hi! I'm MedBot, your AI health assistant 👋\nAsk me anything about your health, or use these shortcuts:",
+        text: "Hi! I'm MedBot, your AI health assistant 👋\nAsk me anything about your health, or use the quick links below:",
         actions: [
-          { label: '📅 Book Appointment', onClick: () => navigate({ to: '/appointments' }) },
+          { label: '📅 Appointments', onClick: () => navigate({ to: '/appointments' }) },
           { label: '💊 Prescriptions', onClick: () => navigate({ to: '/prescriptions' }) },
-          { label: '📂 Medical Records', onClick: () => navigate({ to: '/records' }) },
-          { label: '💬 Message Doctor', onClick: () => navigate({ to: '/messages' }) },
+          { label: '📂 Records', onClick: () => navigate({ to: '/records' }) },
+          { label: '🔒 MedLocker', onClick: () => navigate({ to: '/medlocker' }) },
+          { label: '💬 Messages', onClick: () => navigate({ to: '/messages' }) },
         ],
       });
     }
@@ -73,46 +67,19 @@ export function ChatBot() {
     const text = input.trim();
     if (!text || isTyping) return;
 
-    addMsg({ sender: 'user', type: 'text', text });
+    addMsg({ sender: 'user', text });
     setInput('');
     setIsTyping(true);
 
-    try {
-      // Image generation shortcut
-      if (text.toLowerCase().startsWith('/image ')) {
-        const desc = text.slice(7).trim();
-        const data = await callApi(IMG_URL, desc);
-        if (data.status === 'success') {
-          addMsg({ sender: 'bot', type: 'image', imageUrl: data.imageUrl });
-        } else {
-          addMsg({ sender: 'bot', type: 'error', text: 'Image generation failed. Please try again.' });
-        }
-        setIsTyping(false);
-        return;
-      }
+    const newHistory: GroqMessage[] = [...history, { role: 'user', content: text }];
+    setHistory(newHistory);
 
-      // Normal LLM call with medical persona
-      const data = await callApi(LLM_URL, PERSONA + text);
-      if (data.status === 'success') {
-        const reply: string = data.text || '';
-        // Check if the LLM decided to generate an image
-        if (reply.trim().toLowerCase().startsWith('/image')) {
-          const desc = reply.substring(reply.toLowerCase().indexOf('/image') + 6).trim();
-          setIsTyping(true);
-          const imgData = await callApi(IMG_URL, desc);
-          if (imgData.status === 'success') {
-            addMsg({ sender: 'bot', type: 'image', imageUrl: imgData.imageUrl });
-          } else {
-            addMsg({ sender: 'bot', type: 'text', text: reply });
-          }
-        } else {
-          addMsg({ sender: 'bot', type: 'text', text: reply });
-        }
-      } else {
-        addMsg({ sender: 'bot', type: 'error', text: 'Sorry, I ran into an issue. Please try again.' });
-      }
-    } catch (err) {
-      addMsg({ sender: 'bot', type: 'error', text: 'Network error. Please check your connection and try again.' });
+    try {
+      const reply = await groqChat(newHistory);
+      addMsg({ sender: 'bot', text: reply });
+      setHistory(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (err: any) {
+      addMsg({ sender: 'bot', text: 'Sorry, I ran into an issue connecting to the AI. Please try again.', isError: true });
     } finally {
       setIsTyping(false);
     }
@@ -133,7 +100,7 @@ export function ChatBot() {
                 <span className="font-black text-lg tracking-tight block">MedBot AI</span>
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-white/80">Always Online</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-white/80">Powered by Groq</span>
                 </div>
               </div>
             </div>
@@ -145,33 +112,18 @@ export function ChatBot() {
 
           {/* Messages */}
           <CardContent className="flex-1 overflow-y-auto p-5 space-y-4 bg-gradient-to-b from-white/30 to-[#f8fafc]/50">
-            {messages.map((msg) => (
+            {messages.map(msg => (
               <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                 <div className={`max-w-[85%] space-y-2 ${msg.sender === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
-                  {msg.type === 'image' && msg.imageUrl ? (
-                    <div className="relative">
-                      <img
-                        src={msg.imageUrl}
-                        alt="AI Generated"
-                        className="rounded-2xl max-w-[220px] shadow-md cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => window.open(msg.imageUrl, '_blank')}
-                      />
-                      <a href={msg.imageUrl} download="medbot-image.png"
-                        className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-lg hover:bg-black/80 transition-colors">
-                        ⬇ Save
-                      </a>
-                    </div>
-                  ) : (
-                    <div className={`px-4 py-3 rounded-3xl shadow-sm text-sm font-medium leading-relaxed whitespace-pre-wrap ${
-                      msg.sender === 'user'
-                        ? 'bg-primary text-white rounded-tr-none'
-                        : msg.type === 'error'
-                        ? 'bg-red-50 text-red-600 border border-red-200 rounded-tl-none'
-                        : 'bg-white text-foreground rounded-tl-none border border-border/30'
-                    }`}>
-                      {msg.text}
-                    </div>
-                  )}
+                  <div className={`px-4 py-3 rounded-3xl shadow-sm text-sm font-medium leading-relaxed whitespace-pre-wrap ${
+                    msg.sender === 'user'
+                      ? 'bg-primary text-white rounded-tr-none'
+                      : msg.isError
+                      ? 'bg-red-50 text-red-600 border border-red-200 rounded-tl-none'
+                      : 'bg-white text-foreground rounded-tl-none border border-border/30'
+                  }`}>
+                    {msg.text}
+                  </div>
                   {msg.actions && (
                     <div className="flex flex-wrap gap-2 mt-1 px-1">
                       {msg.actions.map((action, i) => (
@@ -205,7 +157,7 @@ export function ChatBot() {
             <form onSubmit={handleSend} className="flex items-center gap-2 p-1.5 bg-[#f8fafc] rounded-2xl ring-1 ring-border/50 focus-within:ring-primary/20 focus-within:bg-white transition-all duration-300">
               <input
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={e => setInput(e.target.value)}
                 placeholder="Ask me anything..."
                 disabled={isTyping}
                 className="flex-1 bg-transparent border-none focus:ring-0 outline-none text-sm font-medium text-foreground py-2 px-3 h-10 disabled:opacity-50"
@@ -217,7 +169,7 @@ export function ChatBot() {
             </form>
             <div className="flex items-center justify-center gap-1.5 mt-3 text-muted-foreground/40">
               <ShieldCheck size={10} />
-              <span className="text-[8px] font-black uppercase tracking-widest">Powered by MedBot AI</span>
+              <span className="text-[8px] font-black uppercase tracking-widest">MedBot · Groq llama3-70b</span>
             </div>
           </div>
         </Card>

@@ -2,42 +2,36 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Bot, ShieldCheck } from 'lucide-react';
 import { useDoctorAuth } from '../contexts/DoctorAuthContext';
 import { format } from 'date-fns';
-
-// ─── API config ───────────────────────────────────────────────────────────────
-const LLM_URL = 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQnBYN0haRnpBSFdpSkhRVkZQeXlVMUg4WjA4ZmxTaVowZTZjNHdKTkFUSHRSNGtaaEdJWUJhd0NCM3NXSl9FTjBPdkNaQV93OC1zamxWUGM3RFJmeVZKLTFXenc9PQ==';
-const IMG_URL = 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQnBYN0haRnpBSFdpSkhRVkZQeXlVMUg4WjA4ZmxTaVowZTZjNHdKTkFUSHRSNGtaaEdJWUJhd0NCM3NXSl9FTjBPdkNaQV93OC1zamxWUGM3RFJmeVZKLTFXenc9PQ==';
-
-const DOCTOR_PERSONA = 'You are MedAssist AI, an intelligent assistant for doctors in MedPanel Pro hospital management system. ' +
-  'You help doctors with clinical decision support, medical knowledge, patient case discussions, and portal navigation. ' +
-  'Always remind users to apply their own clinical judgment. Keep responses concise and professional. ' +
-  'If the user asks to generate/create an image, reply with "/image " followed by the description. ' +
-  'Doctor query: ';
+import { groqChat, type GroqMessage } from '../../lib/groqChat';
 
 interface ChatMsg {
   id: string;
-  type: 'text' | 'image' | 'error';
-  text?: string;
-  imageUrl?: string;
+  text: string;
   sender: 'bot' | 'user';
   timestamp: Date;
-}
-
-async function callApi(url: string, prompt: string): Promise<any> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  return res.json();
+  isError?: boolean;
 }
 
 export function DoctorChatBot() {
   const { doctorData } = useDoctorAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [history, setHistory] = useState<GroqMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const doctorFirstName = doctorData?.name?.split(' ')[0] || 'Doctor';
+
+  const systemPrompt: GroqMessage = {
+    role: 'system',
+    content:
+      `You are MedAssist AI, an intelligent clinical support assistant for Dr. ${doctorFirstName} in MedPanel Pro. ` +
+      'Help the doctor with: clinical decision support, drug interactions, differential diagnoses, medical knowledge, ' +
+      'treatment guidelines (Indian & international), and navigating the hospital portal. ' +
+      'Be concise, professional, and evidence-based. Always remind the doctor to apply their own clinical judgment. ' +
+      'Use plain text only — no markdown formatting.',
+  };
 
   const addMsg = (msg: Omit<ChatMsg, 'id' | 'timestamp'>) => {
     setMessages(prev => [...prev, { ...msg, id: Date.now().toString(), timestamp: new Date() }]);
@@ -46,10 +40,10 @@ export function DoctorChatBot() {
 
   useEffect(() => {
     if (isOpen && messages.length === 0) {
+      setHistory([systemPrompt]);
       addMsg({
         sender: 'bot',
-        type: 'text',
-        text: `Hello, Dr. ${doctorData?.name?.split(' ')[0] || 'Doctor'}! 👋\nI'm MedAssist AI. Ask me clinical questions, get patient info support, or type /image <description> to generate medical diagrams.`,
+        text: `Hello, Dr. ${doctorFirstName}! 👋\nI'm MedAssist AI, your clinical support assistant powered by Groq. Ask me about diagnoses, drug interactions, treatment protocols, or patient management.`,
       });
     }
   }, [isOpen]);
@@ -63,42 +57,19 @@ export function DoctorChatBot() {
     const text = input.trim();
     if (!text || isTyping) return;
 
-    addMsg({ sender: 'user', type: 'text', text });
+    addMsg({ sender: 'user', text });
     setInput('');
     setIsTyping(true);
 
-    try {
-      if (text.toLowerCase().startsWith('/image ')) {
-        const desc = text.slice(7).trim();
-        const data = await callApi(IMG_URL, desc);
-        if (data.status === 'success') {
-          addMsg({ sender: 'bot', type: 'image', imageUrl: data.imageUrl });
-        } else {
-          addMsg({ sender: 'bot', type: 'error', text: 'Image generation failed. Please try again.' });
-        }
-        setIsTyping(false);
-        return;
-      }
+    const newHistory: GroqMessage[] = [...history, { role: 'user', content: text }];
+    setHistory(newHistory);
 
-      const data = await callApi(LLM_URL, DOCTOR_PERSONA + text);
-      if (data.status === 'success') {
-        const reply: string = data.text || '';
-        if (reply.trim().toLowerCase().startsWith('/image')) {
-          const desc = reply.substring(reply.toLowerCase().indexOf('/image') + 6).trim();
-          const imgData = await callApi(IMG_URL, desc);
-          if (imgData.status === 'success') {
-            addMsg({ sender: 'bot', type: 'image', imageUrl: imgData.imageUrl });
-          } else {
-            addMsg({ sender: 'bot', type: 'text', text: reply });
-          }
-        } else {
-          addMsg({ sender: 'bot', type: 'text', text: reply });
-        }
-      } else {
-        addMsg({ sender: 'bot', type: 'error', text: 'Sorry, I ran into an issue. Please try again.' });
-      }
-    } catch {
-      addMsg({ sender: 'bot', type: 'error', text: 'Network error. Please check your connection.' });
+    try {
+      const reply = await groqChat(newHistory);
+      addMsg({ sender: 'bot', text: reply });
+      setHistory(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (err: any) {
+      addMsg({ sender: 'bot', text: 'Sorry, I ran into a connection issue. Please try again.', isError: true });
     } finally {
       setIsTyping(false);
     }
@@ -118,7 +89,7 @@ export function DoctorChatBot() {
                 <p className="text-sm font-bold text-white">MedAssist AI</p>
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse" />
-                  <span className="text-[10px] font-semibold text-emerald-100 uppercase tracking-widest">Online</span>
+                  <span className="text-[10px] font-semibold text-emerald-100 uppercase tracking-widest">Groq · llama3-70b</span>
                 </div>
               </div>
             </div>
@@ -133,27 +104,15 @@ export function DoctorChatBot() {
             {messages.map(msg => (
               <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-200`}>
                 <div className={`max-w-[85%] space-y-1 ${msg.sender === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
-                  {msg.type === 'image' && msg.imageUrl ? (
-                    <div className="relative">
-                      <img src={msg.imageUrl} alt="AI Generated"
-                        className="rounded-2xl max-w-full shadow-md cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => window.open(msg.imageUrl, '_blank')} />
-                      <a href={msg.imageUrl} download="medassist-image.png"
-                        className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-lg">
-                        ⬇ Save
-                      </a>
-                    </div>
-                  ) : (
-                    <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                      msg.sender === 'user'
-                        ? 'bg-emerald-600 text-white rounded-tr-sm'
-                        : msg.type === 'error'
-                        ? 'bg-red-50 text-red-600 border border-red-200 rounded-tl-sm'
-                        : 'bg-white text-slate-800 border border-slate-200 rounded-tl-sm shadow-sm'
-                    }`}>
-                      {msg.text}
-                    </div>
-                  )}
+                  <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                    msg.sender === 'user'
+                      ? 'bg-emerald-600 text-white rounded-tr-sm'
+                      : msg.isError
+                      ? 'bg-red-50 text-red-600 border border-red-200 rounded-tl-sm'
+                      : 'bg-white text-slate-800 border border-slate-200 rounded-tl-sm shadow-sm'
+                  }`}>
+                    {msg.text}
+                  </div>
                   <span className="text-[9px] font-medium text-slate-400 px-1">
                     {format(msg.timestamp, 'h:mm a')}
                   </span>
@@ -178,7 +137,7 @@ export function DoctorChatBot() {
               <input
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                placeholder="Ask anything..."
+                placeholder="Ask a clinical question..."
                 disabled={isTyping}
                 className="flex-1 bg-transparent border-none outline-none text-sm font-medium text-slate-800 py-2.5 h-10 disabled:opacity-50"
               />
@@ -189,7 +148,7 @@ export function DoctorChatBot() {
             </form>
             <div className="flex items-center justify-center gap-1 mt-2 text-slate-400">
               <ShieldCheck size={9} />
-              <span className="text-[8px] font-semibold uppercase tracking-widest">MedAssist AI · For Clinical Support</span>
+              <span className="text-[8px] font-semibold uppercase tracking-widest">MedAssist AI · Clinical Support Only</span>
             </div>
           </div>
         </div>
